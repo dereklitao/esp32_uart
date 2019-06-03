@@ -2,57 +2,44 @@
 
 #define BUF_SIZE (1024)
 
-#define TXD0_PIN (GPIO_NUM_4)
-#define RXD0_PIN (GPIO_NUM_5)
+#define TXD0_PIN (GPIO_NUM_15)
+#define RXD0_PIN (GPIO_NUM_2)
+#define RTS0_PIN (GPIO_NUM_0)
 
-#define TXD1_PIN (GPIO_NUM_16)
+#define TXD1_PIN (GPIO_NUM_4)
 #define RXD1_PIN (GPIO_NUM_17)
+#define RTS1_PIN (GPIO_NUM_16)
 
-#define TXD2_PIN (GPIO_NUM_18)
+#define TXD2_PIN (GPIO_NUM_5)
 #define RXD2_PIN (GPIO_NUM_19)
+#define RTS2_PIN (GPIO_NUM_18)
 
-static QueueHandle_t uart0_queue;
+#define LED_PIN (GPIO_NUM_21)
+#define UART0_PIN (GPIO_NUM_0)
+#define UART2_PIN (GPIO_NUM_14)
 
-uint32_t byte_count0 = 0;
-uint32_t byte_count1 = 0;
-uint32_t byte_count2 = 0;
+#define RELAY01_PIN (GPIO_NUM_23)
+#define RELAY02_PIN (GPIO_NUM_22)
 
-uint32_t byte_complete0 = 0;
-uint32_t byte_complete1 = 0;
-uint32_t byte_complete2 = 0;
+#define RELAY11_PIN (GPIO_NUM_12)
+#define RELAY12_PIN (GPIO_NUM_13)
 
-void uart0_receive_one_byte(uint8_t data)
+#define GPIO_SELECTED_PIN (1ULL << LED_PIN) | (1ULL << RELAY01_PIN) | (1ULL << RELAY02_PIN) | (1ULL << RELAY11_PIN) | (1ULL << RELAY12_PIN)
+
+uint32_t byte_count[3];
+uint32_t complete_count[3];
+
+static void uart_receive_one_byte(uart_port_t uart_num, uint8_t data)
 {
-    byte_count0++;
+    byte_count[uart_num]++;
 }
 
-void uart0_receive_complete(void)
+static void uart_receive_complete(uart_port_t uart_num)
 {
-    byte_complete0++;
-    uart_flush_input(UART_NUM_0);
+    complete_count[uart_num]++;
 }
 
-void uart1_receive_one_byte(uint8_t data)
-{
-    byte_count1++;
-}
-
-void uart1_receive_complete(void)
-{
-    byte_complete1++;
-}
-
-void uart2_receive_one_byte(uint8_t data)
-{
-    byte_count2++;
-}
-
-void uart2_receive_complete(void)
-{
-    byte_complete2++;
-}
-
-static void init()
+static void init(void)
 {
     const uart_config_t uart_config = {
         .baud_rate = 115200,
@@ -64,23 +51,32 @@ static void init()
     uart_param_config(UART_NUM_1, &uart_config);
     uart_param_config(UART_NUM_2, &uart_config);
 
-    uart_set_pin(UART_NUM_0, TXD0_PIN, RXD0_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-    uart_set_pin(UART_NUM_1, TXD1_PIN, RXD1_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-    uart_set_pin(UART_NUM_2, TXD2_PIN, RXD2_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    uart_set_pin(UART_NUM_0, TXD0_PIN, RXD0_PIN, RTS0_PIN, UART_PIN_NO_CHANGE);
+    uart_set_pin(UART_NUM_1, TXD1_PIN, RXD1_PIN, RTS1_PIN, UART_PIN_NO_CHANGE);
+    uart_set_pin(UART_NUM_2, TXD2_PIN, RXD2_PIN, RTS2_PIN, UART_PIN_NO_CHANGE);
 
-    uart0_handler.receive_one_byte = uart0_receive_one_byte;
-    uart0_handler.receive_complete = uart0_receive_complete;
-    uart1_handler.receive_one_byte = uart1_receive_one_byte;
-    uart1_handler.receive_complete = uart1_receive_complete;
-    uart2_handler.receive_one_byte = uart2_receive_one_byte;
-    uart2_handler.receive_complete = uart2_receive_complete;
+    uart_handler.receive_one_byte = uart_receive_one_byte;
+    uart_handler.receive_complete = uart_receive_complete;
 
     uart_driver_install(UART_NUM_0, BUF_SIZE * 2, BUF_SIZE * 2, 0, NULL, 0);
     uart_driver_install(UART_NUM_1, BUF_SIZE * 2, BUF_SIZE * 2, 0, NULL, 0);
     uart_driver_install(UART_NUM_2, BUF_SIZE * 2, BUF_SIZE * 2, 0, NULL, 0);
+
+    uart_set_mode(UART_NUM_0, UART_MODE_RS485_HALF_DUPLEX);
+    uart_set_mode(UART_NUM_1, UART_MODE_RS485_HALF_DUPLEX);
+    uart_set_mode(UART_NUM_2, UART_MODE_RS485_HALF_DUPLEX);
 }
 
-static void uart1_tx_task()
+static void uart0_tx_task(void *param)
+{
+    while (true)
+    {
+        uart_write_bytes(UART_NUM_0, "Uart0 Hello world\r\n", 19);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
+}
+
+static void uart1_tx_task(void *param)
 {
     while (true)
     {
@@ -89,21 +85,48 @@ static void uart1_tx_task()
     }
 }
 
-static void uart2_tx_task()
+static void uart2_tx_task(void *param)
 {
     while (true)
     {
         char message[200];
         memset(message, 0, 200);
-        sprintf(message, "uart0: byte %d, complete %d || uart1: byte %d, complete %d || uart2: byte %d, complete %d\r\n", byte_count0, byte_complete0, byte_count1, byte_complete1, byte_count2, byte_complete2);
+        sprintf(message, "uart0: byte %d, complete %d || uart1: byte %d, complete %d || uart2: byte %d, complete %d\r\n", byte_count[0], complete_count[0], byte_count[1], complete_count[1], byte_count[2], complete_count[2]);
         uart_write_bytes(UART_NUM_2, message, strlen(message));
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 }
 
+static void led_flash_task(void *param)
+{
+    static bool flag = false;
+    while (true)
+    {
+        gpio_set_level(LED_PIN, flag);
+        //gpio_set_level(RELAY12_PIN, flag);
+        //gpio_set_level(RELAY01_PIN, !flag);
+        flag = !flag;
+        vTaskDelay(500 / portTICK_PERIOD_MS);
+    }
+}
+
+static void led_gpio_init(void)
+{
+    gpio_config_t io_conf;
+    io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    io_conf.pin_bit_mask = GPIO_SELECTED_PIN;
+    io_conf.pull_down_en = 0;
+    io_conf.pull_up_en = 0;
+    gpio_config(&io_conf);
+}
+
 void app_main()
 {
+    led_gpio_init();
     init();
+    xTaskCreate(uart0_tx_task, "uart0_tx_task", 1024 * 2, NULL, configMAX_PRIORITIES - 3, NULL);
     xTaskCreate(uart1_tx_task, "uart1_tx_task", 1024 * 2, NULL, configMAX_PRIORITIES - 4, NULL);
     xTaskCreate(uart2_tx_task, "uart2_tx_task", 1024 * 2, NULL, configMAX_PRIORITIES - 3, NULL);
+    xTaskCreate(led_flash_task, "led_flash_task", 1024 * 2, NULL, configMAX_PRIORITIES - 6, NULL);
 }
